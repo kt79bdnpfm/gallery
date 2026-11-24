@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Gallery</title>
+<style>
+  :root { --ink: #111; --mute: #8a8a8a; --line: #e6e6e6; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: #fff; color: var(--ink); }
+  body { font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+
+  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #login form { width: 100%; max-width: 260px; display: flex; flex-direction: column; gap: 12px; margin-top: -10vh; }
+  #login input { font: inherit; text-align: center; letter-spacing: .08em; border: 0; border-bottom: 1px solid #ddd; padding: 10px 4px; background: transparent; color: #111; border-radius: 0; }
+  #login input:focus { outline: none; border-color: #111; }
+  #login button { font: inherit; font-size: 11px; letter-spacing: .22em; text-transform: uppercase; border: 0; background: none; color: #8a8a8a; cursor: pointer; padding: 8px; }
+  #login button:hover { color: #111; }
+  #login p { margin: 0; min-height: 1.4em; text-align: center; font-size: 12px; color: #b3261e; }
+
+  main { padding: 12vh 16px 20vh; display: flex; flex-direction: column; align-items: center; gap: 14vh; }
+  h1.site { font-weight: 400; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; margin: 0; color: var(--ink); }
+  h2.header { font-weight: 400; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; margin: 4vh 0 -6vh; text-align: center; max-width: 680px; }
+  .block { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  .frame { --h: min(82vh, 900px); height: var(--h); max-width: min(100%, 1200px); display: flex; align-items: center; justify-content: center; }
+  .frame img, .frame video { display: block; max-height: 100%; max-width: 100%; width: auto; height: auto; object-fit: contain; background: #f6f6f6; }
+  .single .frame { height: auto; }
+  .single .frame img, .single .frame video { max-height: var(--h); }
+  .vwrap { position: relative; display: flex; max-height: 100%; max-width: 100%; }
+  .single .vwrap { max-height: var(--h); }
+  .play { position: absolute; inset: 0; margin: auto; width: 64px; height: 64px; border-radius: 50%; border: 0; background: rgba(255,255,255,.85); color: #111; font-size: 20px; cursor: pointer; padding-left: 5px; }
+  .play:hover { background: #fff; }
+  .play.loading { padding-left: 0; font-size: 12px; letter-spacing: .1em; cursor: default; }
+
+  .carousel { position: relative; width: min(100%, 1200px); }
+  .track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .track::-webkit-scrollbar { display: none; }
+  .slide { flex: 0 0 100%; scroll-snap-align: center; display: flex; justify-content: center; }
+  .slide .frame { max-width: 100%; }
+  .nav { position: absolute; top: 0; bottom: 0; width: 18%; border: 0; background: none; cursor: pointer; opacity: 0; transition: opacity .2s; color: var(--ink); font-size: 22px; padding: 0 2%; }
+  .nav.prev { left: 0; text-align: left; } .nav.next { right: 0; text-align: right; }
+  .carousel:hover .nav:not([disabled]) { opacity: .55; }
+  .nav[disabled] { cursor: default; }
+  .count { margin-top: 14px; font-size: 11px; letter-spacing: .18em; color: var(--mute); font-variant-numeric: tabular-nums; }
+
+  .comment { margin-top: 18px; max-width: 560px; text-align: center; color: #444; white-space: pre-wrap; }
+  .date { margin-top: 10px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
+  .count + .date { margin-top: 4px; }
+  @media (hover: none) { .nav { display: none; } }
+  @media (max-width: 600px) { main { gap: 10vh; padding-top: 8vh; } .frame { --h: 70vh; } }
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <form>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+    <button type="submit">Enter</button>
+    <p id="err"></p>
+  </form>
+</div>
+<main id="g" hidden></main>
+<script>
+(function () {
+  var main = document.getElementById('g');
+  var subtle = window.crypto && window.crypto.subtle;
+  var key, meta;
+  var fmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+                set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+                del: function (k) { try { localStorage.removeItem(k); } catch (e) {} } };
+
+  // ---------- crypto ----------
+  function hex(s) { var a = new Uint8Array(s.length / 2); for (var i = 0; i < a.length; i++) a[i] = parseInt(s.substr(i * 2, 2), 16); return a; }
+  function b64(buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); }
+  function unb64(s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); }
+  function derive(pw) {
+    return subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']).then(function (base) {
+      return subtle.deriveKey({ name: 'PBKDF2', salt: hex(meta.salt), iterations: meta.iter, hash: 'SHA-256' }, base,
+        { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+    });
+  }
+  function decrypt(buf) {
+    return subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(buf, 0, 12) }, key, new Uint8Array(buf, 12));
+  }
+  function getBin(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ' ' + r.status); return r.arrayBuffer(); }); }
+
+  // limit parallel downloads so the photos near the viewer come first
+  var queue = [], active = 0;
+  function pump() {
+    while (active < 6 && queue.length) {
+      var job = queue.shift(); active++;
+      job.run().then(job.ok, job.fail).then(function () { active--; pump(); });
+    }
+  }
+  function schedule(run) { return new Promise(function (ok, fail) { queue.push({ run: run, ok: ok, fail: fail }); pump(); }); }
+
+  var cache = {};
+  function blobUrl(ref, type) {
+    if (!cache[ref.n]) {
+      cache[ref.n] = schedule(function () {
+        var parts = [];
+        for (var i = 0; i < ref.c; i++) parts.push(getBin('m/' + ref.n + '.' + i).then(decrypt));
+        return Promise.all(parts).then(function (bufs) { return URL.createObjectURL(new Blob(bufs, { type: type })); });
+      });
+    }
+    return cache[ref.n];
+  }
+
+  // ---------- rendering ----------
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function placeholder(w, h) { return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"/>'); }
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      io.unobserve(en.target);
+      var img = en.target;
+      blobUrl(JSON.parse(img.dataset.ref), 'image/jpeg').then(function (u) { img.src = u; }, function () {});
+    });
+  }, { rootMargin: '1200px' });
+
+  function media(it) {
+    var f = el('div', 'frame');
+    if (it.kind === 'video') {
+      var wrap = el('div', 'vwrap'), v = el('video'), btn = el('button', 'play', '▶');
+      v.width = it.w; v.height = it.h; v.playsInline = true; v.preload = 'none';
+      v.poster = placeholder(it.w, it.h);
+      v.dataset.ref = JSON.stringify(it.poster);
+      blobUrl(it.poster, 'image/jpeg').then(function (u) { v.poster = u; }, function () {});
+      btn.setAttribute('aria-label', 'Play video');
+      btn.onclick = function () {
+        btn.classList.add('loading'); btn.textContent = '…';
+        blobUrl(it.src, 'video/mp4').then(function (u) {
+          v.src = u; v.controls = true; btn.remove(); v.play();
+        }, function () { btn.classList.remove('loading'); btn.textContent = '▶'; });
+      };
+      wrap.appendChild(v); wrap.appendChild(btn); f.appendChild(wrap);
+    } else {
+      var img = el('img');
+      img.width = it.w; img.height = it.h; img.alt = ''; img.decoding = 'async';
+      img.src = placeholder(it.w, it.h);
+      img.dataset.ref = JSON.stringify(it.src);
+      io.observe(img);
+      f.appendChild(img);
+    }
+    return f;
+  }
+
+  function dateLabel(items) {
+    var ts = items.map(function (it) { return it.ts; }).filter(function (t) { return t != null; });
+    if (!ts.length) return '';
+    var a = fmt.format(new Date(Math.min.apply(null, ts) * 1000));
+    var b = fmt.format(new Date(Math.max.apply(null, ts) * 1000));
+    return a === b ? a : a + ' – ' + b;
+  }
+
+  function carousel(items) {
+    var wrap = el('div', 'carousel'), track = el('div', 'track');
+    items.forEach(function (it) { var s = el('div', 'slide'); s.appendChild(media(it)); track.appendChild(s); });
+    var prev = el('button', 'nav prev', '‹'), next = el('button', 'nav next', '›');
+    prev.setAttribute('aria-label', 'Previous'); next.setAttribute('aria-label', 'Next');
+    var count = el('div', 'count');
+    function idx() { return Math.round(track.scrollLeft / track.clientWidth); }
+    function update() {
+      var i = idx();
+      count.textContent = (i + 1) + ' / ' + items.length;
+      prev.disabled = i === 0; next.disabled = i === items.length - 1;
+      track.querySelectorAll('video').forEach(function (v) { if (!v.paused && v.closest('.slide') !== track.children[i]) v.pause(); });
+    }
+    function go(d) { track.scrollTo({ left: (idx() + d) * track.clientWidth, behavior: 'smooth' }); }
+    prev.onclick = function () { go(-1); }; next.onclick = function () { go(1); };
+    var t; track.addEventListener('scroll', function () { clearTimeout(t); t = setTimeout(update, 60); });
+    window.addEventListener('resize', update);
+    wrap.tabIndex = 0;
+    wrap.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); });
+    wrap.appendChild(track); wrap.appendChild(prev); wrap.appendChild(next);
+    var frag = document.createDocumentFragment();
+    frag.appendChild(wrap); frag.appendChild(count);
+    setTimeout(update);
+    return frag;
+  }
+
+  function render(data) {
+    if (data.title) { main.appendChild(el('h1', 'site', data.title)); document.title = data.title; }
+    data.blocks.forEach(function (b) {
+      if (b.type === 'header') { if (b.text) main.appendChild(el('h2', 'header', b.text)); return; }
+      var items = b.items.map(function (id) { return data.items[id]; }).filter(Boolean);
+      if (!items.length) return;
+      var block = el('section', 'block ' + (items.length > 1 ? 'multi' : 'single'));
+      block.appendChild(items.length > 1 ? carousel(items) : media(items[0]));
+      var dl = dateLabel(items);
+      if (dl) block.appendChild(el('div', 'date', dl));
+      if (b.comment) block.appendChild(el('p', 'comment', b.comment));
+      main.appendChild(block);
+    });
+    document.getElementById('login').hidden = true;
+    main.hidden = false;
+  }
+
+  // ---------- unlock ----------
+  var KEY_STORE = 'gallery-key';
+  function open() {
+    return getBin('data.bin?' + Date.now()).then(decrypt).then(function (buf) {
+      render(JSON.parse(new TextDecoder().decode(buf)));
+    });
+  }
+  function showLogin(msg) {
+    document.getElementById('login').hidden = false;
+    document.getElementById('err').textContent = msg || '';
+    document.getElementById('pw').focus();
+  }
+
+  document.querySelector('#login form').onsubmit = function (e) {
+    e.preventDefault();
+    var pw = document.getElementById('pw').value;
+    document.getElementById('err').textContent = '';
+    derive(pw).then(function (k) {
+      key = k;
+      return open().then(function () {
+        return subtle.exportKey('raw', k).then(function (raw) { store.set(KEY_STORE, meta.salt + ':' + b64(raw)); });
+      });
+    }).catch(function () { showLogin('Wrong password'); document.getElementById('pw').select(); });
+  };
+
+  if (!subtle) { showLogin('This page needs a secure (https) connection.'); return; }
+  fetch('meta.json?' + Date.now()).then(function (r) { return r.json(); }).then(function (m) {
+    meta = m;
+    var saved = (store.get(KEY_STORE) || '').split(':');
+    if (saved[0] !== meta.salt || !saved[1]) return showLogin();
+    subtle.importKey('raw', unb64(saved[1]), 'AES-GCM', true, ['decrypt']).then(function (k) {
+      key = k; return open();
+    }).catch(function () { store.del(KEY_STORE); showLogin(); });
+  });
+})();
+</script>
+</body>
+</html>
