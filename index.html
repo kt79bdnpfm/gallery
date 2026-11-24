@@ -34,21 +34,26 @@
   .play:hover { background: #fff; }
   .play.loading { padding-left: 0; font-size: 12px; letter-spacing: .1em; cursor: default; }
 
-  .carousel { position: relative; width: min(100%, 1200px); }
-  .track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .carousel { position: relative; width: 100%; max-width: 1600px; --ch: min(76vh, 840px); }
+  .track { position: relative; display: flex; align-items: center; gap: clamp(12px, 2.2vw, 32px); height: var(--ch); overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
   .track::-webkit-scrollbar { display: none; }
-  .slide { flex: 0 0 100%; scroll-snap-align: center; display: flex; justify-content: center; }
-  .slide .frame { max-width: 100%; }
-  .nav { position: absolute; top: 0; bottom: 0; width: 18%; border: 0; background: none; cursor: pointer; opacity: 0; transition: opacity .2s; color: var(--ink); font-size: 22px; padding: 0 2%; }
-  .nav.prev { left: 0; text-align: left; } .nav.next { right: 0; text-align: right; }
-  .carousel:hover .nav:not([disabled]) { opacity: .55; }
-  .nav[disabled] { cursor: default; }
-  .count { margin-top: 14px; font-size: 11px; letter-spacing: .18em; color: var(--mute); font-variant-numeric: tabular-nums; }
+  .slide { flex: 0 0 auto; scroll-snap-align: center; display: flex; align-items: center; justify-content: center; opacity: .38; transition: opacity .35s ease; cursor: pointer; }
+  .slide.active { opacity: 1; cursor: auto; }
+  .slide .frame { height: auto; max-width: none; }
+  .slide img, .slide video { display: block; max-width: none; max-height: none; background: #f6f6f6; }
+  .slide .vwrap { max-width: none; max-height: none; }
+  .nav { position: absolute; top: calc(var(--ch) / 2); transform: translateY(-50%); z-index: 2; width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.07); background: rgba(255,255,255,.94); color: var(--ink); box-shadow: 0 2px 12px rgba(0,0,0,.13); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity .25s, transform .2s, box-shadow .2s; }
+  .nav svg { width: 20px; height: 20px; }
+  .nav.prev { left: max(8px, calc(50% - 50vw + 16px)); } .nav.next { right: max(8px, calc(50% - 50vw + 16px)); }
+  .nav:hover { transform: translateY(-50%) scale(1.07); box-shadow: 0 3px 16px rgba(0,0,0,.18); }
+  .nav:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .nav[disabled] { opacity: 0; pointer-events: none; }
+  .count { margin-top: 16px; font-size: 11px; letter-spacing: .18em; color: var(--mute); font-variant-numeric: tabular-nums; }
+  @media (max-width: 600px) { .carousel { --ch: 62vh; width: calc(100% + 32px); max-width: none; margin: 0 -16px; } .nav { width: 36px; height: 36px; } .nav svg { width: 16px; height: 16px; } }
 
   .comment { margin-top: 18px; max-width: 560px; text-align: center; color: #444; white-space: pre-wrap; }
   .date { margin-top: 10px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
   .count + .date { margin-top: 4px; }
-  @media (hover: none) { .nav { display: none; } }
   @media (max-width: 600px) { main { gap: 10vh; padding-top: 8vh; } .frame { --h: 70vh; } }
 </style>
 </head>
@@ -156,29 +161,60 @@
     return a === b ? a : a + ' – ' + b;
   }
 
+  function prefetch(slide) { slide.querySelectorAll('img[data-ref]').forEach(function (img) { if (img.dataset.loaded) return; img.dataset.loaded = 1; io.unobserve(img); blobUrl(JSON.parse(img.dataset.ref), 'image/jpeg').then(function (u) { img.src = u; }, function () {}); }); }
+
   function carousel(items) {
-    var wrap = el('div', 'carousel'), track = el('div', 'track');
-    items.forEach(function (it) { var s = el('div', 'slide'); s.appendChild(media(it)); track.appendChild(s); });
-    var prev = el('button', 'nav prev', '‹'), next = el('button', 'nav next', '›');
-    prev.setAttribute('aria-label', 'Previous'); next.setAttribute('aria-label', 'Next');
+    var wrap = el('div', 'carousel'), track = el('div', 'track'), cur = 0;
+    var slides = items.map(function (it, k) {
+      var s = el('div', 'slide'); s.appendChild(media(it));
+      s.addEventListener('click', function () { if (k !== cur) goTo(k); });
+      track.appendChild(s); return s;
+    });
+    var chev = function (d) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + d + '"/></svg>'; };
+    var prev = el('button', 'nav prev'), next = el('button', 'nav next');
+    prev.innerHTML = chev('M15 5l-7 7 7 7'); next.innerHTML = chev('M9 5l7 7-7 7');
+    prev.setAttribute('aria-label', 'Previous photo'); next.setAttribute('aria-label', 'Next photo');
     var count = el('div', 'count');
-    function idx() { return Math.round(track.scrollLeft / track.clientWidth); }
-    function update() {
-      var i = idx();
-      count.textContent = (i + 1) + ' / ' + items.length;
-      prev.disabled = i === 0; next.disabled = i === items.length - 1;
-      track.querySelectorAll('video').forEach(function (v) { if (!v.paused && v.closest('.slide') !== track.children[i]) v.pause(); });
+
+    // size every slide to its photo's shape at the carousel height, so neighbours peek in at the edges
+    function layout() {
+      var H = track.clientHeight, vw = window.innerWidth, maxW = vw < 700 ? vw * 0.7 : Math.min(vw * 0.78, 1100);
+      slides.forEach(function (s, k) {
+        var it = items[k], ar = it.w / it.h, w = Math.min(H * ar, maxW), h = w / ar;
+        var m = s.querySelector('img, video');
+        m.style.width = Math.round(w) + 'px'; m.style.height = Math.round(h) + 'px';
+      });
+      var W = track.clientWidth;
+      track.style.paddingLeft = Math.max(0, (W - slides[0].offsetWidth) / 2) + 'px';
+      track.style.paddingRight = Math.max(0, (W - slides[slides.length - 1].offsetWidth) / 2) + 'px';
     }
-    function go(d) { track.scrollTo({ left: (idx() + d) * track.clientWidth, behavior: 'smooth' }); }
-    prev.onclick = function () { go(-1); }; next.onclick = function () { go(1); };
-    var t; track.addEventListener('scroll', function () { clearTimeout(t); t = setTimeout(update, 60); });
-    window.addEventListener('resize', update);
+    function center(s) { return s.offsetLeft + s.offsetWidth / 2; }
+    function nearest() {
+      var c = track.scrollLeft + track.clientWidth / 2, best = 0, bd = Infinity;
+      slides.forEach(function (s, k) { var d = Math.abs(center(s) - c); if (d < bd) { bd = d; best = k; } });
+      return best;
+    }
+    function update() {
+      cur = nearest();
+      slides.forEach(function (s, k) { s.classList.toggle('active', k === cur); });
+      count.textContent = (cur + 1) + ' / ' + items.length;
+      prev.disabled = cur === 0; next.disabled = cur === items.length - 1;
+      track.querySelectorAll('video').forEach(function (v) { if (!v.paused && v.closest('.slide') !== slides[cur]) v.pause(); });
+      for (var k = cur - 1; k <= cur + 2; k++) if (slides[k]) prefetch(slides[k]);
+    }
+    function goTo(k) {
+      k = Math.max(0, Math.min(items.length - 1, k));
+      track.scrollTo({ left: center(slides[k]) - track.clientWidth / 2, behavior: 'smooth' });
+    }
+    prev.onclick = function () { goTo(cur - 1); }; next.onclick = function () { goTo(cur + 1); };
+    var raf; track.addEventListener('scroll', function () { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); }, { passive: true });
+    window.addEventListener('resize', function () { var k = cur; layout(); track.scrollLeft = center(slides[k]) - track.clientWidth / 2; update(); });
     wrap.tabIndex = 0;
-    wrap.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); });
+    wrap.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft') goTo(cur - 1); if (e.key === 'ArrowRight') goTo(cur + 1); });
     wrap.appendChild(track); wrap.appendChild(prev); wrap.appendChild(next);
     var frag = document.createDocumentFragment();
     frag.appendChild(wrap); frag.appendChild(count);
-    setTimeout(update);
+    setTimeout(function () { layout(); track.scrollLeft = 0; update(); });
     return frag;
   }
 
