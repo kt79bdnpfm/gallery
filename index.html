@@ -21,7 +21,11 @@
   #login p { margin: 0; min-height: 1.4em; text-align: center; font-size: 12px; color: #b3261e; }
 
   main { padding: 12vh 16px 20vh; display: flex; flex-direction: column; align-items: center; gap: 14vh; }
-  h1.site { font-weight: 400; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; margin: 0; color: var(--ink); }
+  h1.site { font-weight: 400; font-size: clamp(20px, 3vw, 28px); letter-spacing: .2em; text-transform: uppercase; margin: 0; color: var(--ink); }
+  .top { display: flex; flex-direction: column; align-items: center; gap: 28px; margin-bottom: -8vh; }
+  @media (max-width: 600px) { .top { margin-bottom: -5vh; } }
+  p.outro { margin: 0; text-align: center; color: #444; font-size: 15px; white-space: pre-wrap; }
+  p.intro { margin: 0; max-width: 520px; text-align: center; color: #444; font-size: 15px; line-height: 1.8; white-space: pre-wrap; text-wrap: pretty; }
   h2.header { font-weight: 400; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; margin: 4vh 0 -6vh; text-align: center; max-width: 680px; }
   .block { width: 100%; display: flex; flex-direction: column; align-items: center; }
   .frame { --h: min(82vh, 900px); height: var(--h); max-width: min(100%, 1200px); display: flex; align-items: center; justify-content: center; }
@@ -226,7 +230,12 @@
   }
 
   function render(data) {
-    if (data.title) { main.appendChild(el('h1', 'site', data.title)); document.title = data.title; }
+    if (data.title || data.intro) {
+      var top = el('header', 'top');
+      if (data.title) { top.appendChild(el('h1', 'site', data.title)); document.title = data.title; }
+      if (data.intro) top.appendChild(el('p', 'intro', data.intro.trim()));
+      main.appendChild(top);
+    }
     data.blocks.forEach(function (b) {
       if (b.type === 'header') { if (b.text) main.appendChild(el('h2', 'header', b.text)); return; }
       var items = b.items.map(function (id) { return data.items[id]; }).filter(Boolean);
@@ -238,6 +247,7 @@
       if (b.comment) block.appendChild(el('p', 'comment', b.comment));
       main.appendChild(block);
     });
+    if (data.outro) main.appendChild(el('p', 'outro', data.outro.trim()));
     document.getElementById('login').hidden = true;
     main.hidden = false;
   }
