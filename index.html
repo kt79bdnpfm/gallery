@@ -125,6 +125,11 @@
       blobUrl(JSON.parse(img.dataset.ref), 'image/jpeg').then(function (u) { img.src = u; }, function () {});
     });
   }, { rootMargin: '1200px' });
+  // carousels and video posters only start loading once they come near the screen
+  var near = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) { if (en.isIntersecting) { near.unobserve(en.target); en.target._near(); } });
+  }, { rootMargin: '800px' });
+  function whenNear(node, fn) { node._near = fn; near.observe(node); }
 
   function media(it) {
     var f = el('div', 'frame');
@@ -133,7 +138,7 @@
       v.width = it.w; v.height = it.h; v.playsInline = true; v.preload = 'none';
       v.poster = placeholder(it.w, it.h);
       v.dataset.ref = JSON.stringify(it.poster);
-      blobUrl(it.poster, 'image/jpeg').then(function (u) { v.poster = u; }, function () {});
+      whenNear(wrap, function () { blobUrl(it.poster, 'image/jpeg').then(function (u) { v.poster = u; }, function () {}); });
       btn.setAttribute('aria-label', 'Play video');
       btn.onclick = function () {
         btn.classList.add('loading'); btn.textContent = '…';
@@ -164,7 +169,7 @@
   function prefetch(slide) { slide.querySelectorAll('img[data-ref]').forEach(function (img) { if (img.dataset.loaded) return; img.dataset.loaded = 1; io.unobserve(img); blobUrl(JSON.parse(img.dataset.ref), 'image/jpeg').then(function (u) { img.src = u; }, function () {}); }); }
 
   function carousel(items) {
-    var wrap = el('div', 'carousel'), track = el('div', 'track'), cur = 0;
+    var wrap = el('div', 'carousel'), track = el('div', 'track'), cur = 0, seen = false, lastW = 0;
     var slides = items.map(function (it, k) {
       var s = el('div', 'slide'); s.appendChild(media(it));
       s.addEventListener('click', function () { if (k !== cur) goTo(k); });
@@ -200,7 +205,7 @@
       count.textContent = (cur + 1) + ' / ' + items.length;
       prev.disabled = cur === 0; next.disabled = cur === items.length - 1;
       track.querySelectorAll('video').forEach(function (v) { if (!v.paused && v.closest('.slide') !== slides[cur]) v.pause(); });
-      for (var k = cur - 1; k <= cur + 2; k++) if (slides[k]) prefetch(slides[k]);
+      if (seen) for (var k = cur - 1; k <= cur + 2; k++) if (slides[k]) prefetch(slides[k]);
     }
     function goTo(k) {
       k = Math.max(0, Math.min(items.length - 1, k));
@@ -208,13 +213,15 @@
     }
     prev.onclick = function () { goTo(cur - 1); }; next.onclick = function () { goTo(cur + 1); };
     var raf; track.addEventListener('scroll', function () { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); }, { passive: true });
-    window.addEventListener('resize', function () { var k = cur; layout(); track.scrollLeft = center(slides[k]) - track.clientWidth / 2; update(); });
+    // iOS fires resize while scrolling (toolbar show/hide); only re-lay out when the width really changes
+    window.addEventListener('resize', function () { if (window.innerWidth === lastW) return; lastW = window.innerWidth; var k = cur; layout(); track.scrollLeft = center(slides[k]) - track.clientWidth / 2; update(); });
+    whenNear(wrap, function () { seen = true; update(); });
     wrap.tabIndex = 0;
     wrap.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft') goTo(cur - 1); if (e.key === 'ArrowRight') goTo(cur + 1); });
     wrap.appendChild(track); wrap.appendChild(prev); wrap.appendChild(next);
     var frag = document.createDocumentFragment();
     frag.appendChild(wrap); frag.appendChild(count);
-    setTimeout(function () { layout(); track.scrollLeft = 0; update(); });
+    setTimeout(function () { lastW = window.innerWidth; layout(); track.scrollLeft = 0; update(); });
     return frag;
   }
 
